@@ -1,0 +1,234 @@
+name: Tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  # Unit tests - all Python versions in parallel
+  unit-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.13", "3.14"]
+
+    name: Unit (Py ${{ matrix.python-version }})
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install --upgrade "typing_extensions>=4.8.0"
+        pip install pytest pytest-asyncio pytest-cov
+        pip install "aiogram>=3.0.0"
+        pip install -e ".[dev]"
+        pip install --upgrade --force-reinstall "typing_extensions>=4.8.0"
+
+    - name: Run unit tests
+      run: |
+        pytest tests/ -v \
+          --ignore=tests/test_e2e_migration.py \
+          --ignore=tests/test_integration.py \
+          --ignore=tests/test_integration_real.py \
+          --ignore=tests/test_webhook_telegram.py \
+          -m "not integration and not e2e"
+
+  # Test mode (no tokens, no network) — always runs in CI.
+  # We do NOT install aiogram-test-framework: that is for the user's project.
+  # Our tests only need: pytest, pytest-asyncio, aiogram, obabot (and umaxbot via obabot).
+  test-mode:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.13"]
+
+    name: Test mode (Py ${{ matrix.python-version }})
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pytest pytest-asyncio
+        pip install "aiogram>=3.0.0"
+        pip install -e .
+
+    - name: Run test-mode tests
+      run: |
+        pytest tests/test_test_mode.py tests/test_basic.py -v -k "test_mode or test_create_bot_no_tokens"
+
+  # E2E tests for Telegram
+  e2e-telegram:
+    runs-on: ubuntu-latest
+
+    name: E2E Telegram
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python 3.13
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.13"
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install --upgrade "typing_extensions>=4.8.0"
+        pip install pytest pytest-asyncio pytest-cov
+        pip install "aiogram>=3.0.0"
+        pip install -e ".[dev]"
+        pip install --upgrade --force-reinstall "typing_extensions>=4.8.0"
+
+    - name: Run E2E Telegram tests
+      env:
+        TG_TOKEN: ${{ secrets.TG_TEST_TOKEN }}
+      run: |
+        pytest tests/test_e2e_migration.py tests/test_webhook_telegram.py -v \
+          -k "telegram or Telegram or tg or dual" \
+          --cov=obabot --cov-report=xml
+
+    - name: Upload coverage
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage.xml
+        flags: e2e-telegram
+
+  # E2E tests for Max
+  e2e-max:
+    runs-on: ubuntu-latest
+
+    name: E2E Max
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python 3.13
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.13"
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install --upgrade "typing_extensions>=4.8.0"
+        pip install pytest pytest-asyncio pytest-cov
+        pip install "aiogram>=3.0.0"
+        pip install -e ".[dev]"
+        pip install --upgrade --force-reinstall "typing_extensions>=4.8.0"
+
+    - name: Run E2E Max tests
+      env:
+        MAX_TOKEN: ${{ secrets.MAX_TEST_TOKEN }}
+      run: |
+        pytest tests/test_e2e_migration.py -v \
+          -k "max or Max" \
+          --cov=obabot --cov-report=xml
+
+    - name: Upload coverage
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage.xml
+        flags: e2e-max
+
+  # Compatibility tests - different aiogram versions
+  compatibility:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - python-version: "3.10"
+            aiogram-version: "3.0.0"
+            test-name: "aiogram-3.0"
+          - python-version: "3.13"
+            aiogram-version: "3.24"
+            test-name: "aiogram-3.24"
+          - python-version: "3.14"
+            aiogram-version: ""
+            test-name: "aiogram-latest"
+
+    name: Compat ${{ matrix.test-name }}
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install --upgrade "typing_extensions>=4.8.0"
+        pip install pytest pytest-asyncio pytest-cov
+        
+        if [ "${{ matrix.aiogram-version }}" != "" ]; then
+          pip install "aiogram==${{ matrix.aiogram-version }}"
+        else
+          pip install "aiogram>=3.0.0"
+        fi
+        
+        pip install -e ".[dev]"
+        pip install --upgrade --force-reinstall "typing_extensions>=4.8.0"
+
+    - name: Run compatibility tests
+      run: |
+        pytest tests/test_compatibility.py tests/test_aiogram_comparison.py -v
+
+  # Integration tests - require real tokens
+  integration:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+
+    name: Integration
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python 3.13
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.13"
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install --upgrade "typing_extensions>=4.8.0"
+        pip install pytest pytest-asyncio pytest-cov
+        pip install "aiogram>=3.0.0"
+        pip install -e ".[dev]"
+        pip install --upgrade --force-reinstall "typing_extensions>=4.8.0"
+
+    - name: Run integration tests
+      env:
+        TG_TOKEN: ${{ secrets.TG_TEST_TOKEN }}
+        MAX_TOKEN: ${{ secrets.MAX_TEST_TOKEN }}
+      run: |
+        pytest tests/test_integration.py -v -m integration \
+          --cov=obabot --cov-report=xml
+
+    - name: Upload coverage
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage.xml
+        flags: integration
