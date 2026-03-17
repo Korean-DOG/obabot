@@ -120,7 +120,31 @@ def create_bot(
     if fsm_storage is not None:
         proxy_dispatcher.fsm_storage = fsm_storage
 
+    _register_coverage_middleware_if_enabled(proxy_router)
+
     return proxy_bot, proxy_dispatcher, proxy_router
+
+
+def _register_coverage_middleware_if_enabled(router: Any) -> None:
+    """
+    Register FSMCoverageMiddleware if COVERAGE_LOG or COVERAGE_LOG_DIR is set.
+    
+    This enables automatic FSM transition logging for use with fsm-voyager.
+    """
+    from obabot.middleware.fsm_coverage import is_coverage_enabled, FSMCoverageMiddleware
+    
+    if not is_coverage_enabled():
+        return
+    
+    middleware = FSMCoverageMiddleware()
+    
+    if hasattr(router, "message") and hasattr(router.message, "middleware"):
+        router.message.middleware(middleware)
+        logger.info("FSMCoverageMiddleware registered for message handlers")
+    
+    if hasattr(router, "callback_query") and hasattr(router.callback_query, "middleware"):
+        router.callback_query.middleware(middleware)
+        logger.info("FSMCoverageMiddleware registered for callback_query handlers")
 
 
 def _create_bot_test_mode(fsm_storage: Optional[Any] = None) -> Tuple[StubBot, Any, Any]:
@@ -139,8 +163,29 @@ def _create_bot_test_mode(fsm_storage: Optional[Any] = None) -> Tuple[StubBot, A
     dispatcher.include_router(router)
     if fsm_storage is not None:
         dispatcher.fsm_storage = fsm_storage
+    
+    _register_coverage_middleware_if_enabled_aiogram(router)
+    
     logger.info("Test mode: returning StubBot, aiogram Dispatcher, aiogram Router (router included in dp)")
     return stub_bot, dispatcher, router
+
+
+def _register_coverage_middleware_if_enabled_aiogram(router: Any) -> None:
+    """
+    Register FSMCoverageMiddleware on aiogram Router if coverage is enabled.
+    
+    Used for test mode where we have a native aiogram Router.
+    """
+    from obabot.middleware.fsm_coverage import is_coverage_enabled, FSMCoverageMiddleware
+    
+    if not is_coverage_enabled():
+        return
+    
+    middleware = FSMCoverageMiddleware()
+    
+    router.message.middleware(middleware)
+    router.callback_query.middleware(middleware)
+    logger.info("FSMCoverageMiddleware registered for test mode router")
 
 
 # ---------------------------------------------------------------------------

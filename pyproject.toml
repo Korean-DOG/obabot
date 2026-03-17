@@ -19,6 +19,19 @@ dependencies = [
     "umaxbot>=0.1.7",
 ]
 
+[project.optional-dependencies]
+voyager = [
+    "fsm-voyager>=0.1.0",
+]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.0.0",
+]
+all = [
+    "obabot[voyager,dev]",
+]
+
 [project.urls]
 Homepage = "https://github.com/Korean-DOG/obabot"
 Repository = "https://github.com/Korean-DOG/obabot"

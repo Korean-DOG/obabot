@@ -1,0 +1,92 @@
+{
+  "bot_name": "RegistrationBot",
+  "initial_state": "start",
+  "states": {
+    "start": {
+      "text": "👋 Привет!\n\nДобро пожаловать в бота!\n\nВыберите действие:",
+      "buttons": [
+        [
+          {"text": "📝 Регистрация", "data": "register"},
+          {"text": "ℹ️ Информация", "data": "info"}
+        ],
+        [
+          {"text": "📊 Статистика", "data": "stats"}
+        ]
+      ]
+    },
+    "waiting_name": {
+      "text": "Как тебя зовут?",
+      "buttons": []
+    },
+    "waiting_email": {
+      "text": "Отлично! Теперь введите email:",
+      "buttons": []
+    },
+    "waiting_phone": {
+      "text": "Теперь введите номер телефона:",
+      "buttons": []
+    }
+  },
+  "transitions": [
+    {
+      "from": "start",
+      "to": "waiting_name",
+      "action": "callback:register",
+      "label": "Регистрация"
+    },
+    {
+      "from": "waiting_name",
+      "to": "waiting_email",
+      "action": "text:*",
+      "label": "Ввод имени"
+    },
+    {
+      "from": "waiting_email",
+      "to": "waiting_phone",
+      "action": "text:*",
+      "label": "Ввод email"
+    },
+    {
+      "from": "waiting_phone",
+      "to": "start",
+      "action": "text:*",
+      "label": "Ввод телефона (завершение)"
+    },
+    {
+      "from": "waiting_name",
+      "to": "start",
+      "action": "command:/cancel",
+      "label": "Отмена"
+    },
+    {
+      "from": "waiting_email",
+      "to": "start",
+      "action": "command:/cancel",
+      "label": "Отмена"
+    },
+    {
+      "from": "waiting_phone",
+      "to": "start",
+      "action": "command:/cancel",
+      "label": "Отмена"
+    },
+    {
+      "from": "waiting_name",
+      "to": "start",
+      "action": "command:/reset",
+      "label": "Сброс"
+    },
+    {
+      "from": "waiting_email",
+      "to": "start",
+      "action": "command:/reset",
+      "label": "Сброс"
+    },
+    {
+      "from": "waiting_phone",
+      "to": "start",
+      "action": "command:/reset",
+      "label": "Сброс"
+    }
+  ]
+}
