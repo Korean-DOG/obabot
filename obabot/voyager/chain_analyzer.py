@@ -391,3 +391,106 @@ class ChainAnalyzer:
         
         with open(path, "w", encoding="utf-8") as f:
             json.dump(report.to_dict(), f, indent=2, ensure_ascii=False)
+    
+    def export_graphviz(
+        self,
+        path: Union[str, Path],
+        include_counts: bool = True,
+        highlight_dead_ends: bool = True,
+        highlight_orphans: bool = True,
+    ) -> None:
+        """
+        Export navigation graph as Graphviz DOT diagram.
+        
+        Compatible with fsm-voyager's generate_graphviz_diagram output format.
+        
+        Args:
+            path: Output file path (.dot)
+            include_counts: Include transition counts on edges
+            highlight_dead_ends: Highlight dead end states in red
+            highlight_orphans: Highlight orphan states in yellow
+        """
+        report = self.analyze()
+        
+        lines = [
+            'digraph FSM {',
+            '    graph [rankdir=TB, bgcolor="transparent", fontname="Segoe UI, Arial", pad="0.4", nodesep="0.7", ranksep="1.0"];',
+            '    node [shape=box, style="rounded,filled", fontname="Segoe UI, Arial", fontsize=11];',
+            '    edge [fontname="Segoe UI, Arial", fontsize=10, color="#999999", arrowsize=0.8];',
+            '',
+        ]
+        
+        for state in sorted(self._all_states):
+            attrs = ['fillcolor="#E8F4FD"', 'color="#5288C1"']
+            
+            if highlight_dead_ends and state in report.dead_ends:
+                attrs = ['fillcolor="#ffcccc"', 'color="#cc0000"']
+            elif highlight_orphans and state in report.orphan_states:
+                attrs = ['fillcolor="#ffffcc"', 'color="#cccc00"']
+            
+            lines.append(f'    {state} [{", ".join(attrs)}];')
+        
+        lines.append('')
+        
+        for (from_state, to_state), count in sorted(self._transition_counts.items()):
+            label_parts = []
+            if include_counts and count > 1:
+                label_parts.append(f"x{count}")
+            
+            attrs = []
+            if label_parts:
+                attrs.append(f'label=" {" ".join(label_parts)} "')
+            
+            if attrs:
+                lines.append(f'    {from_state} -> {to_state} [{", ".join(attrs)}];')
+            else:
+                lines.append(f'    {from_state} -> {to_state};')
+        
+        lines.append('}')
+        
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('\n'.join(lines), encoding="utf-8")
+    
+    def get_reachable_states(self, from_state: str) -> Set[str]:
+        """
+        Get all states reachable from a given state.
+        
+        Compatible with fsm-voyager's FSMModel.get_reachable_states().
+        
+        Args:
+            from_state: Starting state
+        
+        Returns:
+            Set of reachable state IDs
+        """
+        visited: Set[str] = set()
+        queue = [from_state]
+        
+        while queue:
+            current = queue.pop(0)
+            if current in visited:
+                continue
+            visited.add(current)
+            
+            if current in self._outgoing:
+                for next_state in self._outgoing[current]:
+                    if next_state not in visited:
+                        queue.append(next_state)
+        
+        return visited
+    
+    def get_unreachable_states(self, initial_state: str) -> Set[str]:
+        """
+        Get states that cannot be reached from initial state.
+        
+        Compatible with fsm-voyager's FSMModel.get_unreachable_states().
+        
+        Args:
+            initial_state: The starting state
+        
+        Returns:
+            Set of unreachable state IDs
+        """
+        reachable = self.get_reachable_states(initial_state)
+        return self._all_states - reachable

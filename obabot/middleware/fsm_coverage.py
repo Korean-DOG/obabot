@@ -17,6 +17,15 @@ Simple CSV format:
 Extended CSV format (COVERAGE_EXTENDED=1):
     timestamp,user_id,session_id,from_state,to_state,trigger_type,trigger_data,depth,is_back
     2024-01-01T12:00:00,123,sess_abc,start,catalog,callback,catalog,1,false
+
+Supported action types (compatible with fsm-voyager):
+- callback:<data> - Callback query with specific data
+- command:/cmd - Bot command
+- text:* - Any text message
+- text:<pattern> - Specific text pattern
+- state_enter:<state> - Entering a state (explicit logging)
+- state_exit:<state> - Exiting a state (explicit logging)
+- any:* - Any trigger (wildcard)
 """
 
 from __future__ import annotations
@@ -229,6 +238,12 @@ def extract_action_from_event(event: Any) -> str:
     
     Returns:
         Action in format: callback:<data>, command:<cmd>, or text:*
+    
+    Supported action types (fsm-voyager compatible):
+    - callback:<data> - Callback query
+    - command:/cmd - Bot command
+    - text:* - Any text message
+    - any:* - Wildcard (for explicit logging)
     """
     from aiogram.types import Message, CallbackQuery
     
@@ -246,7 +261,125 @@ def extract_action_from_event(event: Any) -> str:
         
         return "text:*"
     
-    return "unknown:*"
+    return "any:*"
+
+
+def log_state_enter(state: str, user_id: str = "") -> None:
+    """
+    Explicitly log entering a state (state_enter action type).
+    
+    Use this for states that are entered without a user trigger,
+    e.g., scheduled transitions or system-initiated state changes.
+    
+    Args:
+        state: The state being entered
+        user_id: Optional user ID for extended format
+    """
+    coverage_logger = get_coverage_logger()
+    if coverage_logger is None:
+        return
+    
+    if coverage_logger.extended:
+        session_id = get_or_create_session(user_id) if user_id else "system"
+        current_depth = get_user_depth(user_id) if user_id else 0
+        coverage_logger.log_transition_extended(
+            from_state=None,
+            to_state=state,
+            trigger_type="state_enter",
+            trigger_data=state,
+            user_id=user_id,
+            session_id=session_id,
+            depth=current_depth,
+            is_back=False,
+        )
+    else:
+        coverage_logger.log_transition(None, state, f"state_enter:{state}")
+
+
+def log_state_exit(state: str, user_id: str = "") -> None:
+    """
+    Explicitly log exiting a state (state_exit action type).
+    
+    Use this for states that are exited without a direct user trigger,
+    e.g., timeout transitions or system-initiated state changes.
+    
+    Args:
+        state: The state being exited
+        user_id: Optional user ID for extended format
+    """
+    coverage_logger = get_coverage_logger()
+    if coverage_logger is None:
+        return
+    
+    if coverage_logger.extended:
+        session_id = get_or_create_session(user_id) if user_id else "system"
+        current_depth = get_user_depth(user_id) if user_id else 0
+        coverage_logger.log_transition_extended(
+            from_state=state,
+            to_state=None,
+            trigger_type="state_exit",
+            trigger_data=state,
+            user_id=user_id,
+            session_id=session_id,
+            depth=current_depth,
+            is_back=False,
+        )
+    else:
+        coverage_logger.log_transition(state, None, f"state_exit:{state}")
+
+
+def log_transition_explicit(
+    from_state: Optional[str],
+    to_state: Optional[str],
+    action: str,
+    user_id: str = "",
+) -> None:
+    """
+    Explicitly log a state transition with custom action.
+    
+    Use this for manual logging when automatic middleware detection
+    doesn't capture the transition (e.g., background tasks, timers).
+    
+    Args:
+        from_state: Source state (None if entering from outside FSM)
+        to_state: Target state (None if exiting FSM)
+        action: Action string in format "type:value"
+        user_id: Optional user ID for extended format
+    
+    Example:
+        log_transition_explicit("idle", "processing", "any:timer_triggered")
+    """
+    coverage_logger = get_coverage_logger()
+    if coverage_logger is None:
+        return
+    
+    if coverage_logger.extended:
+        session_id = get_or_create_session(user_id) if user_id else "system"
+        current_depth = get_user_depth(user_id) if user_id else 0
+        
+        trigger_type = "any"
+        trigger_data = action
+        if ":" in action:
+            trigger_type, trigger_data = action.split(":", 1)
+        
+        new_depth = calculate_depth(current_depth, action)
+        is_back = is_back_navigation(action) or new_depth < current_depth
+        
+        coverage_logger.log_transition_extended(
+            from_state=from_state,
+            to_state=to_state,
+            trigger_type=trigger_type,
+            trigger_data=trigger_data,
+            user_id=user_id,
+            session_id=session_id,
+            depth=new_depth,
+            is_back=is_back,
+        )
+        
+        if user_id:
+            set_user_depth(user_id, new_depth)
+    else:
+        coverage_logger.log_transition(from_state, to_state, action)
 
 
 def extract_trigger_parts(event: Any) -> Tuple[str, str]:

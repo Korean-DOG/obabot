@@ -424,3 +424,171 @@ class TestChainReport:
         assert data["avg_depth"] == 2.5
         assert "state_a" in data["dead_ends"]
         assert "orphan_1" in data["orphan_states"]
+
+
+class TestGraphvizExport:
+    """Tests for Graphviz DOT export."""
+    
+    def test_export_graphviz_basic(self, tmp_path):
+        """Should export valid DOT format."""
+        csv_path = tmp_path / "coverage.log"
+        csv_path.write_text(
+            "from_state,to_state,action\n"
+            "start,catalog,callback:catalog\n"
+            "catalog,item,callback:item\n"
+        )
+        
+        analyzer = ChainAnalyzer()
+        analyzer.load_csv(csv_path)
+        
+        output_path = tmp_path / "graph.dot"
+        analyzer.export_graphviz(output_path)
+        
+        content = output_path.read_text()
+        assert "digraph FSM" in content
+        assert "start" in content
+        assert "catalog" in content
+        assert "item" in content
+        assert "->" in content
+    
+    def test_export_graphviz_highlights_dead_ends(self, tmp_path):
+        """Should highlight dead end states."""
+        csv_path = tmp_path / "coverage.log"
+        csv_path.write_text(
+            "from_state,to_state,action\n"
+            "start,dead_end,callback:go\n"
+        )
+        
+        analyzer = ChainAnalyzer()
+        analyzer.load_csv(csv_path)
+        
+        output_path = tmp_path / "graph.dot"
+        analyzer.export_graphviz(output_path, highlight_dead_ends=True)
+        
+        content = output_path.read_text()
+        assert "dead_end" in content
+        assert "#ffcccc" in content or "#cc0000" in content
+
+
+class TestReachabilityAnalysis:
+    """Tests for reachability analysis methods."""
+    
+    def test_get_reachable_states(self, tmp_path):
+        """Should find all reachable states."""
+        csv_path = tmp_path / "coverage.log"
+        csv_path.write_text(
+            "from_state,to_state,action\n"
+            "start,a,callback:a\n"
+            "a,b,callback:b\n"
+            "b,c,callback:c\n"
+            "isolated,nowhere,callback:x\n"
+        )
+        
+        analyzer = ChainAnalyzer()
+        analyzer.load_csv(csv_path)
+        
+        reachable = analyzer.get_reachable_states("start")
+        
+        assert "start" in reachable
+        assert "a" in reachable
+        assert "b" in reachable
+        assert "c" in reachable
+        assert "isolated" not in reachable
+    
+    def test_get_unreachable_states(self, tmp_path):
+        """Should find unreachable states."""
+        csv_path = tmp_path / "coverage.log"
+        csv_path.write_text(
+            "from_state,to_state,action\n"
+            "start,a,callback:a\n"
+            "orphan,somewhere,callback:x\n"
+        )
+        
+        analyzer = ChainAnalyzer()
+        analyzer.load_csv(csv_path)
+        
+        unreachable = analyzer.get_unreachable_states("start")
+        
+        assert "orphan" in unreachable
+        assert "somewhere" in unreachable
+        assert "start" not in unreachable
+        assert "a" not in unreachable
+
+
+class TestStateEnterExitLogging:
+    """Tests for state_enter/state_exit explicit logging."""
+    
+    def test_log_state_enter(self, tmp_path, monkeypatch):
+        """Should log state_enter action."""
+        from obabot.middleware.fsm_coverage import (
+            log_state_enter,
+            reset_coverage_state,
+        )
+        
+        log_path = tmp_path / "coverage.log"
+        monkeypatch.setenv("COVERAGE_LOG", str(log_path))
+        reset_coverage_state()
+        
+        log_state_enter("new_state", user_id="123")
+        
+        content = log_path.read_text()
+        assert "state_enter:new_state" in content
+    
+    def test_log_state_exit(self, tmp_path, monkeypatch):
+        """Should log state_exit action."""
+        from obabot.middleware.fsm_coverage import (
+            log_state_exit,
+            reset_coverage_state,
+        )
+        
+        log_path = tmp_path / "coverage.log"
+        monkeypatch.setenv("COVERAGE_LOG", str(log_path))
+        reset_coverage_state()
+        
+        log_state_exit("old_state", user_id="123")
+        
+        content = log_path.read_text()
+        assert "state_exit:old_state" in content
+    
+    def test_log_transition_explicit(self, tmp_path, monkeypatch):
+        """Should log explicit transition with custom action."""
+        from obabot.middleware.fsm_coverage import (
+            log_transition_explicit,
+            reset_coverage_state,
+        )
+        
+        log_path = tmp_path / "coverage.log"
+        monkeypatch.setenv("COVERAGE_LOG", str(log_path))
+        reset_coverage_state()
+        
+        log_transition_explicit("idle", "active", "any:timer_triggered")
+        
+        content = log_path.read_text()
+        assert "idle" in content
+        assert "active" in content
+        assert "any:timer_triggered" in content
+
+
+class TestBridgeModule:
+    """Tests for fsm-voyager bridge module."""
+    
+    def test_is_fsm_voyager_available(self):
+        """Should detect if fsm-voyager is installed."""
+        from obabot.voyager.bridge import is_fsm_voyager_available
+        
+        result = is_fsm_voyager_available()
+        assert isinstance(result, bool)
+    
+    def test_bridge_functions_raise_without_fsm_voyager(self):
+        """Bridge functions should raise ImportError if fsm-voyager not installed."""
+        from obabot.voyager.bridge import is_fsm_voyager_available
+        
+        if is_fsm_voyager_available():
+            pytest.skip("fsm-voyager is installed")
+        
+        from obabot.voyager.bridge import load_model
+        
+        with pytest.raises(ImportError) as exc_info:
+            load_model("nonexistent.json")
+        
+        assert "fsm-voyager" in str(exc_info.value)
