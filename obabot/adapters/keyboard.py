@@ -282,6 +282,44 @@ def _convert_reply_keyboard(keyboard: Any) -> dict:
     }
 
 
+def convert_keyboard_to_yandex(keyboard: Optional[KeyboardType]) -> Optional[list]:
+    """Convert aiogram InlineKeyboardMarkup to Yandex Messenger inline_keyboard format.
+
+    Yandex uses a flat list of button objects:
+        [{"text": "Да", "callback_data": "yes"}, ...]
+
+    Aiogram uses rows of rows:
+        [[InlineKeyboardButton(text="Да", callback_data="yes")], ...]
+
+    The conversion flattens all rows into a single list.
+
+    Returns:
+        List of button dicts for ``inline_keyboard`` field, or None.
+    """
+    if keyboard is None:
+        return None
+
+    keyboard_type = type(keyboard).__name__
+
+    if keyboard_type != "InlineKeyboardMarkup":
+        logger.debug("[Yandex keyboard] Unsupported keyboard type: %s", keyboard_type)
+        return None
+
+    buttons: list[dict] = []
+    for row in keyboard.inline_keyboard:
+        for button in row:
+            btn: dict = {"text": button.text}
+            url = getattr(button, "url", None)
+            callback_data = getattr(button, "callback_data", None)
+            if url:
+                btn["url"] = url
+            elif callback_data is not None:
+                btn["callback_data"] = callback_data
+            buttons.append(btn)
+
+    return buttons if buttons else None
+
+
 def convert_keyboard_from_max(keyboard: Optional[Any]) -> Optional[KeyboardType]:
     """Convert umaxbot keyboard to aiogram format (reverse conversion)."""
     if keyboard is None:

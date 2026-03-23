@@ -512,6 +512,10 @@ class ProxyDispatcher:
             logger.info("%s feed_webhook: routing to Max", ctx)
             return await self.feed_raw_update(bot, body, platform="max", **kwargs)
         
+        elif platform == "yandex":
+            logger.info("%s feed_webhook: routing to Yandex Messenger", ctx)
+            return await self.feed_raw_update(bot, body, platform="yandex", **kwargs)
+        
         else:
             logger.error("%s feed_webhook: unknown platform", ctx)
             raise ValueError(
@@ -551,10 +555,25 @@ class ProxyDispatcher:
             if "update_id" in update:
                 resolved = self._get_platform("telegram")
                 logger.debug("[Dispatcher] _resolve_platform: detected Telegram by update_id")
+            # Yandex Messenger: "updates" array with items containing "from.login"
+            elif "updates" in update:
+                items = update.get("updates", [])
+                if items and isinstance(items[0], dict):
+                    from_data = items[0].get("from", {})
+                    if isinstance(from_data, dict) and "login" in from_data:
+                        resolved = self._get_platform("yandex")
+                        logger.debug("[Dispatcher] _resolve_platform: detected Yandex by updates[].from.login")
+            else:
+                # Yandex single update (has "from.login" + "message_id" + "timestamp")
+                from_data = update.get("from", {})
+                if isinstance(from_data, dict) and "login" in from_data and "message_id" in update:
+                    resolved = self._get_platform("yandex")
+                    logger.debug("[Dispatcher] _resolve_platform: detected Yandex by from.login")
+            
             # Max updates detection:
             # 1. Primary: "mid" in message.body (unique to Max)
             # 2. Secondary: "update_type" field
-            else:
+            if not resolved:
                 message = update.get("message", {})
                 if isinstance(message, dict):
                     msg_body = message.get("body", {})

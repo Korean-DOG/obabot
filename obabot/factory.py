@@ -56,13 +56,14 @@ class StubBot:
 def create_bot(
     tg_token: Optional[str] = None,
     max_token: Optional[str] = None,
+    yandex_token: Optional[str] = None,
     fsm_storage: Optional[Any] = None,
     test_mode: Optional[bool] = None,
 ) -> Tuple[Union[ProxyBot, StubBot], Union[ProxyDispatcher, Any], Union[ProxyRouter, Any]]:
     """
     Create a bot with the specified platform configuration.
     
-    Uses lazy platform loading: aiogram/maxbot are imported only when the first
+    Uses lazy platform loading: aiogram/maxbot/yandex are imported only when the first
     event for that platform is processed (e.g. webhook). This reduces cold start time.
     
     Test mode (test_mode=True or TESTING=1): no real tokens or connections;
@@ -73,6 +74,7 @@ def create_bot(
     Args:
         tg_token: Telegram bot token (optional; not required in test_mode)
         max_token: Max bot token (optional; not required in test_mode)
+        yandex_token: Yandex Messenger bot token (optional; not required in test_mode)
         fsm_storage: FSM storage instance for state management (optional).
                      Will be shared across all platforms. Example:
                      MemoryStorage(), RedisStorage(redis=redis_client)
@@ -86,10 +88,10 @@ def create_bot(
     if _is_test_mode(test_mode):
         return _create_bot_test_mode(fsm_storage=fsm_storage)
 
-    if not tg_token and not max_token:
+    if not tg_token and not max_token and not yandex_token:
         raise ValueError(
             "At least one token must be provided. "
-            "Use tg_token for Telegram, max_token for Max, or both."
+            "Use tg_token for Telegram, max_token for Max, yandex_token for Yandex Messenger, or any combination."
         )
 
     platforms: list[BasePlatform] = []
@@ -100,6 +102,9 @@ def create_bot(
     if max_token:
         platforms.append(LazyPlatform("max", max_token))
         logger.info("Max platform (lazy) registered")
+    if yandex_token:
+        platforms.append(LazyPlatform("yandex", yandex_token))
+        logger.info("Yandex Messenger platform (lazy) registered")
 
     platform_names = [str(p.platform) for p in platforms]
     if len(platforms) > 1:

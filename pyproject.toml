@@ -5,31 +5,42 @@ build-backend = "hatchling.build"
 [project]
 name = "obabot"
 version = "0.2.0"
-description = "Universal async bot library for Telegram and Max with aiogram-compatible API"
+description = "Universal async bot library for Telegram, Max, and Yandex Messenger with aiogram-compatible API"
 readme = "README.md"
 license = { text = "Proprietary" }
 requires-python = ">=3.10"
 authors = [
     { name = "Alexander Alekseev", email = "phghost@mail.ru" }
 ]
-keywords = ["telegram", "max", "bot", "async", "aiogram", "umaxbot"]
+keywords = ["telegram", "max", "yandex", "messenger", "bot", "async", "aiogram", "umaxbot"]
 
 dependencies = [
     "aiogram>=3.0.0",
     "umaxbot>=0.1.7",
+    "httpx>=0.24.0",
 ]
 
 [project.optional-dependencies]
+yandex = [
+    "httpx>=0.24.0",
+]
 voyager = [
     "fsm-voyager>=0.1.0",
+]
+web = [
+    "fastapi>=0.100.0",
+    "uvicorn>=0.20.0",
+    "python-multipart>=0.0.5",
+    "PyJWT>=2.0.0",
 ]
 dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
     "pytest-cov>=4.0.0",
+    "httpx>=0.24.0",
 ]
 all = [
-    "obabot[voyager,dev]",
+    "obabot[yandex,voyager,web,dev]",
 ]
 
 [project.urls]

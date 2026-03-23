@@ -1,5 +1,5 @@
 """
-obabot - Universal async bot library for Telegram and Max
+obabot - Universal async bot library for Telegram, Max and Yandex Messenger
 
 Usage:
     from obabot import create_bot
@@ -10,8 +10,11 @@ Usage:
     # Max only
     bot, dp, router = create_bot(max_token="YOUR_TOKEN")
     
-    # Both platforms
-    bot, dp, router = create_bot(tg_token="TG_TOKEN", max_token="MAX_TOKEN")
+    # Yandex Messenger only
+    bot, dp, router = create_bot(yandex_token="YOUR_TOKEN")
+    
+    # Multiple platforms
+    bot, dp, router = create_bot(tg_token="TG_TOKEN", max_token="MAX_TOKEN", yandex_token="YA_TOKEN")
 """
 
 from obabot.factory import create_bot, StubBot
@@ -22,7 +25,7 @@ from obabot.config import ObabotConfig, setup_logging
 from obabot.utils.safe_send import safe_telegram_call, with_timeout_handling
 from obabot.mixins import PlatformAwareMixin
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 __all__ = [
     "create_bot",
     "StubBot",

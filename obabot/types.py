@@ -13,6 +13,7 @@ class BPlatform(str, Enum):
     telegram = "telegram"
     tg = "telegram"  # alias
     max = "max"
+    yandex = "yandex"
     
     def __str__(self) -> str:
         return self.value

@@ -97,12 +97,14 @@ def _detect_platform_by_payload(body: dict) -> str:
     Telegram: "update_id" at root (unique to Telegram).
     Max: unique message id "mid" in message.body (Max/umaxbot only; Telegram has no message.body),
          or "update_type" at root (e.g. message_created, message_callback).
+    Yandex Messenger: "updates" array at root with items containing "from.login"
+         (Yandex users have login like user@org.ru).
     
     Args:
         body: Parsed webhook body
         
     Returns:
-        "telegram", "max", or "unknown"
+        "telegram", "max", "yandex", or "unknown"
     """
     if not isinstance(body, dict):
         return "unknown"
@@ -110,6 +112,21 @@ def _detect_platform_by_payload(body: dict) -> str:
     # Check for Telegram format: has "update_id" at root
     if "update_id" in body:
         return "telegram"
+    
+    # Check for Yandex Messenger format: webhook sends {"updates": [...]}
+    # Each update has "from.login" (email-like) and "chat.type" = "private"|"group"
+    updates = body.get("updates")
+    if isinstance(updates, list) and updates:
+        sample = updates[0]
+        if isinstance(sample, dict):
+            from_data = sample.get("from", {})
+            if isinstance(from_data, dict) and "login" in from_data:
+                return "yandex"
+    # Single Yandex update (non-wrapped)
+    from_data = body.get("from", {})
+    if isinstance(from_data, dict) and "login" in from_data and "update_id" not in body:
+        if "message_id" in body and "timestamp" in body:
+            return "yandex"
     
     # Check for Max format (Max/umaxbot webhook payload)
     # Primary indicator: unique message id "mid" in message.body (Max-specific; Telegram has no message.body)
@@ -139,7 +156,7 @@ def detect_platform(body: dict, event: Optional[dict] = None) -> str:
                (headers, requestContext, etc.)
     
     Returns:
-        Platform identifier: "telegram", "max", or "unknown"
+        Platform identifier: "telegram", "max", "yandex", or "unknown"
         
     Example:
         # AWS Lambda handler

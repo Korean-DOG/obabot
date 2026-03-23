@@ -232,6 +232,74 @@ class TestDetectPlatform:
         assert detect_platform(body, event) == "telegram"
 
 
+class TestYandexPayloadDetection:
+    """Test Yandex Messenger payload-based detection."""
+
+    def test_yandex_by_updates_array_with_login(self):
+        """Yandex webhooks send {"updates": [...]} with from.login."""
+        body = {
+            "updates": [
+                {
+                    "from": {"login": "user@yandex.ru", "display_name": "Test"},
+                    "text": "hello",
+                    "chat": {"id": "chat123", "type": "private"},
+                    "message_id": 1,
+                    "timestamp": 1700000000,
+                }
+            ]
+        }
+        assert _detect_platform_by_payload(body) == "yandex"
+
+    def test_yandex_single_update_with_login(self):
+        """Single (non-wrapped) Yandex update with from.login."""
+        body = {
+            "from": {"login": "user@yandex.ru", "display_name": "Test"},
+            "text": "hello",
+            "message_id": 42,
+            "timestamp": 1700000000,
+        }
+        assert _detect_platform_by_payload(body) == "yandex"
+
+    def test_yandex_callback_in_updates(self):
+        """Yandex callback update inside updates array."""
+        body = {
+            "updates": [
+                {
+                    "from": {"login": "user@org.ru", "display_name": "User"},
+                    "callback_data": "btn_ok",
+                    "message_id": 5,
+                    "timestamp": 1700000000,
+                }
+            ]
+        }
+        assert _detect_platform_by_payload(body) == "yandex"
+
+    def test_yandex_not_confused_with_telegram(self):
+        """Telegram has update_id; Yandex does not."""
+        body = {
+            "update_id": 12345,
+            "from": {"login": "user@yandex.ru"},
+            "message_id": 1,
+            "timestamp": 1700000000,
+        }
+        assert _detect_platform_by_payload(body) == "telegram"
+
+    def test_detect_platform_yandex_full(self):
+        """detect_platform() should identify Yandex webhook payloads."""
+        body = {
+            "updates": [
+                {
+                    "from": {"login": "bot@org.ru"},
+                    "text": "/start",
+                    "chat": {"id": "c1", "type": "private"},
+                    "message_id": 1,
+                    "timestamp": 1700000000,
+                }
+            ]
+        }
+        assert detect_platform(body) == "yandex"
+
+
 class TestTelegramIPRanges:
     """Verify Telegram IP ranges are configured correctly."""
     

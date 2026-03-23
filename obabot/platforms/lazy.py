@@ -20,8 +20,8 @@ class LazyPlatform(BasePlatform):
     """
 
     def __init__(self, platform_type: str, token: str):
-        if platform_type not in ("telegram", "max"):
-            raise ValueError(f"platform_type must be 'telegram' or 'max', got {platform_type!r}")
+        if platform_type not in ("telegram", "max", "yandex"):
+            raise ValueError(f"platform_type must be 'telegram', 'max', or 'yandex', got {platform_type!r}")
         self._platform_type = platform_type
         self._token = token
         self._real: Optional[BasePlatform] = None
@@ -47,6 +47,10 @@ class LazyPlatform(BasePlatform):
             from obabot.platforms.max import MaxPlatform
             self._real = MaxPlatform(self._token)
             logger.info("[Lazy] Max platform loaded (first use)")
+        elif self._platform_type == "yandex":
+            from obabot.platforms.yandex import YandexPlatform
+            self._real = YandexPlatform(self._token)
+            logger.info("[Lazy] Yandex platform loaded (first use)")
         else:
             raise RuntimeError(f"Unknown platform_type: {self._platform_type}")
         if self._router_ref:
@@ -57,7 +61,11 @@ class LazyPlatform(BasePlatform):
 
     @property
     def platform(self) -> BPlatform:
-        return BPlatform.telegram if self._platform_type == "telegram" else BPlatform.max
+        if self._platform_type == "telegram":
+            return BPlatform.telegram
+        elif self._platform_type == "yandex":
+            return BPlatform.yandex
+        return BPlatform.max
 
     @property
     def bot(self) -> Any:

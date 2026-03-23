@@ -3,7 +3,8 @@
 import inspect
 import logging
 from functools import partial, wraps
-from typing import Any, Callable, Dict, List, Tuple, TYPE_CHECKING
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from obabot.platforms.base import BasePlatform
@@ -303,11 +304,11 @@ class ProxyRouter:
         logger.info("[%s] Applied %d handlers", platform_name, len(self._pending_handlers))
 
     def _apply_middleware_to_platform(self, platform: "BasePlatform", observer_type: str, middleware: Any, outer: bool = False) -> None:
-        """Register middleware on a single platform's router (Telegram) or store for Max."""
+        """Register middleware on a single platform's router (Telegram) or store for Max/Yandex."""
         from obabot.types import BPlatform
         
-        # For Max platform, store in platform's middleware list (applied in dispatch)
-        if getattr(platform, "platform", None) == BPlatform.max:
+        # For Max/Yandex platforms, store in platform's middleware list (applied in dispatch)
+        if getattr(platform, "platform", None) in (BPlatform.max, BPlatform.yandex):
             if hasattr(platform, "add_middleware"):
                 platform.add_middleware(observer_type, middleware, outer=outer)
                 logger.debug("[%s] %s middleware %s stored", platform.platform, observer_type, type(middleware).__name__)
@@ -522,4 +523,36 @@ class ProxyRouter:
                     platform.router.edited_channel_post(*filters, **kwargs)(wrapped)
             return handler
         return decorator
+
+    # ------------------------------------------------------------------
+    # FSM model extraction
+    # ------------------------------------------------------------------
+
+    def export_fsm(
+        self,
+        *,
+        bot_name: str = "Bot",
+        initial_state: str = "__default__",
+        save_to: Optional[Union[str, Path]] = None,
+    ) -> dict:
+        """Extract FSM model from all registered handlers.
+
+        Combines runtime filter introspection with AST analysis of handler
+        bodies to produce a ``model.json`` dict compatible with FSM-Voyager.
+
+        Args:
+            bot_name: Name stored in the model's ``bot_name`` field.
+            initial_state: Identifier for the implicit "no FSM state" node.
+            save_to: If given, also write the model to this path as JSON.
+
+        Returns:
+            A dict matching the FSM-Voyager ``FSMModel`` schema.
+        """
+        from obabot.voyager.extractor import extract_fsm_model
+        return extract_fsm_model(
+            self,
+            bot_name=bot_name,
+            initial_state=initial_state,
+            save_to=save_to,
+        )
 

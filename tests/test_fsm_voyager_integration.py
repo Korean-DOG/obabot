@@ -124,11 +124,11 @@ class TestExtractAction:
         assert action == "text:*"
     
     def test_unknown_event(self):
-        """Should return unknown:* for unrecognized events."""
+        """Should return any:* for unrecognized events (wildcard fallback)."""
         event = MagicMock()
-        
+
         action = extract_action_from_event(event)
-        assert action == "unknown:*"
+        assert action == "any:*"
 
 
 class TestGetStateName:

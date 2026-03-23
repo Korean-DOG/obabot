@@ -151,6 +151,8 @@ class ProxyFile:
         """Internal: download to buffer or return bytes."""
         if self.platform == BPlatform.telegram:
             return await self._download_telegram(destination, timeout)
+        if self.platform == BPlatform.yandex:
+            return await self._download_from_url(self.file_url, destination, timeout) if self.file_url else None
         return await self._download_max(destination, timeout)
     
     async def _download_telegram(
@@ -378,13 +380,13 @@ class ProxyBot:
         """Send a photo.
         
         Accepts file path, URL, file_id, BufferedReader, or InputFile.
-        Works on both Telegram (send_photo) and Max (send_file with media_type="image").
+        Works on Telegram (send_photo), Max (send_file with media_type="image"),
+        and Yandex (send_file).
         """
         resolved_platform = self._resolve_platform_for_operation(platform)
         bot = self._get_bot_for_operation(platform)
         
         if resolved_platform == BPlatform.max:
-            # Max uses send_file with media_type
             file_path = _get_file_path(photo)
             return await bot.send_file(
                 file_path=file_path,
@@ -393,8 +395,10 @@ class ProxyBot:
                 text=caption or "",
                 reply_markup=kwargs.get("reply_markup"),
             )
+        elif resolved_platform == BPlatform.yandex:
+            file_path = _get_file_path(photo)
+            return await bot.send_file(chat_id=str(chat_id), file_path=file_path)
         else:
-            # Telegram uses send_photo
             photo = _convert_to_input_file(photo)
             return await bot.send_photo(chat_id=chat_id, photo=photo, caption=caption, **kwargs)
     
@@ -409,7 +413,8 @@ class ProxyBot:
         """Send a document.
         
         Accepts file path, URL, file_id, BufferedReader, or InputFile.
-        Works on both Telegram (send_document) and Max (send_file with media_type="file").
+        Works on Telegram (send_document), Max (send_file with media_type="file"),
+        and Yandex (send_file).
         """
         resolved_platform = self._resolve_platform_for_operation(platform)
         bot = self._get_bot_for_operation(platform)
@@ -423,6 +428,9 @@ class ProxyBot:
                 text=caption or "",
                 reply_markup=kwargs.get("reply_markup"),
             )
+        elif resolved_platform == BPlatform.yandex:
+            file_path = _get_file_path(document)
+            return await bot.send_file(chat_id=str(chat_id), file_path=file_path)
         else:
             document = _convert_to_input_file(document)
             return await bot.send_document(chat_id=chat_id, document=document, caption=caption, **kwargs)
@@ -448,6 +456,9 @@ class ProxyBot:
                 text=caption or "",
                 reply_markup=kwargs.get("reply_markup"),
             )
+        elif resolved_platform == BPlatform.yandex:
+            file_path = _get_file_path(video)
+            return await bot.send_file(chat_id=str(chat_id), file_path=file_path)
         else:
             video = _convert_to_input_file(video)
             return await bot.send_video(chat_id=chat_id, video=video, caption=caption, **kwargs)
@@ -949,6 +960,15 @@ class ProxyBot:
         """
         resolved_platform = self._resolve_platform_for_operation(platform)
         bot = self._get_bot_for_operation(platform)
+        
+        if resolved_platform == BPlatform.yandex:
+            return ProxyFile(
+                platform=BPlatform.yandex,
+                file_id=file_id,
+                file_url=file_id,
+                bot=bot,
+                suggested_filename=suggested_filename or "file",
+            )
         
         if resolved_platform == BPlatform.max:
             from obabot.adapters.max_file import MaxFileFilenameError, fetch_filename_from_max_url
