@@ -1,24 +1,16 @@
-Proprietary License
+MIT License
 
 Copyright (c) 2026 Alexander Alekseev (phghost@mail.ru)
 
-All rights reserved.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
 
-TERMS OF USE:
-
-1. FREE USE: You may use this software free of charge for any purpose,
-   including commercial applications.
-
-2. DISTRIBUTION: You may freely distribute and sublicense this software,
-   provided it remains free of charge.
-
-3. NO SALE: You may NOT sell copies of this software or its source code.
-
-4. NO COPYING INTO PROJECTS: You may NOT copy, reproduce, or include any
-   portion of this source code directly in your own projects.
-
-5. NO MODIFICATION: You may NOT modify, adapt, or create derivative works
-   based on this source code.
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
