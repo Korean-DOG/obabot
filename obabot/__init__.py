@@ -22,7 +22,7 @@ from obabot.config import ObabotConfig, setup_logging
 from obabot.utils.safe_send import safe_telegram_call, with_timeout_handling
 from obabot.mixins import PlatformAwareMixin
 
-__version__ = "0.1.0"
+__version__ = "0.2.2"
 __all__ = [
     "create_bot",
     "StubBot",

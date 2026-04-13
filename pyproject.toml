@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "obabot"
-version = "0.2.1"
+version = "0.2.2"
 description = "Universal async bot library for Telegram and Max with aiogram-compatible API"
 readme = "README.md"
 license = { text = "MIT" }

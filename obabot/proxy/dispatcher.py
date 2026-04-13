@@ -2,7 +2,7 @@
 
 import asyncio
 import logging
-from typing import Any, Callable, List, Optional, TYPE_CHECKING
+from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 
 from obabot.config import get_update_context
 from obabot.detection import detect_platform
@@ -44,6 +44,10 @@ class ProxyDispatcher:
         self._running = False
         self._tasks: List[asyncio.Task] = []
         self._fsm_storage: Any = None
+        # umaxbot Dispatcher has no workflow_data; keep aiogram-compatible dict on the proxy
+        self._proxy_workflow_data: Dict[str, Any] = {}
+        # Defer dispatcher-level middlewares until lazy platforms are initialized.
+        self._deferred_dispatcher_middlewares: List[Any] = []
     
     async def start_polling(
         self,
@@ -76,8 +80,22 @@ class ProxyDispatcher:
         ]
         
         try:
-            # Wait for all polling tasks
-            await asyncio.gather(*self._tasks, return_exceptions=True)
+            results = await asyncio.gather(*self._tasks, return_exceptions=True)
+            for task, result in zip(self._tasks, results):
+                if isinstance(result, asyncio.CancelledError):
+                    logger.info("Polling task %r cancelled", task.get_name())
+                elif isinstance(result, Exception):
+                    logger.error(
+                        "Polling task %r failed",
+                        task.get_name(),
+                        exc_info=result,
+                    )
+                elif isinstance(result, BaseException):
+                    logger.error(
+                        "Polling task %r ended with %s",
+                        task.get_name(),
+                        type(result).__name__,
+                    )
         except asyncio.CancelledError:
             logger.info("Polling cancelled")
         finally:
@@ -169,12 +187,9 @@ class ProxyDispatcher:
                     # middleware logic
                     return await handler(event, data)
         """
-        # Register middleware for all platforms
-        for platform in self._platforms:
-            if hasattr(platform.dispatcher, 'middleware'):
-                platform.dispatcher.middleware(middleware)
-            elif hasattr(platform.dispatcher, 'update') and hasattr(platform.dispatcher.update, 'middleware'):
-                platform.dispatcher.update.middleware(middleware)
+        self._deferred_dispatcher_middlewares.append(middleware)
+        for _, dp in self._iter_initialized_platform_dispatchers():
+            self._apply_dispatcher_middleware(dp, middleware)
         
         return middleware
     
@@ -187,23 +202,22 @@ class ProxyDispatcher:
         If multiple platforms have workflow_data, they are merged.
         """
         if not self._platforms:
-            return {}
+            return dict(self._proxy_workflow_data)
         
         # Merge workflow_data from all platforms
-        merged = {}
-        for platform in self._platforms:
-            dp = platform.dispatcher
+        merged: Dict[str, Any] = {}
+        for _, dp in self._iter_initialized_platform_dispatchers():
             platform_data = getattr(dp, 'workflow_data', {})
             if isinstance(platform_data, dict):
                 merged.update(platform_data)
-        
+        merged.update(self._proxy_workflow_data)
         return merged
     
     @workflow_data.setter
     def workflow_data(self, value: dict) -> None:
         """Set workflow data for all platforms."""
-        for platform in self._platforms:
-            dp = platform.dispatcher
+        self._proxy_workflow_data = dict(value)
+        for _, dp in self._iter_initialized_platform_dispatchers():
             if hasattr(dp, 'workflow_data'):
                 dp.workflow_data = value
     
@@ -217,12 +231,24 @@ class ProxyDispatcher:
         """
         if self._fsm_storage is not None:
             return self._fsm_storage
-        
-        if self._platforms:
-            dp = self._platforms[0].dispatcher
-            if hasattr(dp, 'fsm') and hasattr(dp.fsm, 'storage'):
+
+        from obabot.platforms.max import MaxPlatform
+
+        for platform in self._platforms:
+            if isinstance(platform, LazyPlatform):
+                real = platform._real
+                if real is not None and isinstance(real, MaxPlatform):
+                    stor = real._obabot_fsm_storage
+                    if stor is not None:
+                        return stor
+            elif isinstance(platform, MaxPlatform):
+                if platform._obabot_fsm_storage is not None:
+                    return platform._obabot_fsm_storage
+
+        for _, dp in self._iter_initialized_platform_dispatchers():
+            if hasattr(dp, "fsm") and hasattr(dp.fsm, "storage"):
                 return dp.fsm.storage
-        
+
         return None
     
     @fsm_storage.setter
@@ -252,17 +278,57 @@ class ProxyDispatcher:
         if self._fsm_storage is None:
             return
         
+        from obabot.platforms.max import MaxPlatform
+
         # For lazy platforms, check if already initialized
         if isinstance(platform, LazyPlatform):
             if platform._real is not None:
+                if isinstance(platform._real, MaxPlatform):
+                    platform._real.set_obabot_fsm_storage(self._fsm_storage)
                 real_dp = platform._real.dispatcher
                 if hasattr(real_dp, 'fsm') and hasattr(real_dp.fsm, 'storage'):
                     real_dp.fsm.storage = self._fsm_storage
         else:
-            # Direct platform
+            if isinstance(platform, MaxPlatform):
+                platform.set_obabot_fsm_storage(self._fsm_storage)
             dp = platform.dispatcher
             if hasattr(dp, 'fsm') and hasattr(dp.fsm, 'storage'):
                 dp.fsm.storage = self._fsm_storage
+
+    def _iter_initialized_platform_dispatchers(self) -> List[tuple["BasePlatform", Any]]:
+        """Return (platform, dispatcher) only for already initialized platforms."""
+        initialized: List[tuple["BasePlatform", Any]] = []
+        for platform in self._platforms:
+            real_platform: Optional["BasePlatform"] = None
+            if isinstance(platform, LazyPlatform):
+                real_platform = platform._real
+            else:
+                real_platform = platform
+
+            if real_platform is None:
+                continue
+
+            initialized.append((real_platform, real_platform.dispatcher))
+        return initialized
+
+    def _apply_dispatcher_middleware(self, dp: Any, middleware: Any) -> None:
+        """Apply dispatcher-level middleware to an already initialized dispatcher."""
+        if hasattr(dp, 'middleware'):
+            dp.middleware(middleware)
+        elif hasattr(dp, 'update') and hasattr(dp.update, 'middleware'):
+            dp.update.middleware(middleware)
+
+    def _apply_runtime_state_to_platform(self, platform: "BasePlatform") -> None:
+        """Apply deferred proxy state to a newly initialized real platform."""
+        dp = platform.dispatcher
+
+        if self._proxy_workflow_data and hasattr(dp, 'workflow_data'):
+            dp.workflow_data = dict(self._proxy_workflow_data)
+
+        for middleware in self._deferred_dispatcher_middlewares:
+            self._apply_dispatcher_middleware(dp, middleware)
+
+        self._apply_fsm_storage_to_platform(platform)
     
     # Delegate all handler decorators to router for aiogram compatibility
     # This allows using dp.message() instead of router.message()

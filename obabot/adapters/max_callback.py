@@ -20,6 +20,24 @@ logger = logging.getLogger(__name__)
 DEFAULT_TIMEOUT = 30.0
 
 
+def _raise_for_max_response(result: Any, context: str) -> None:
+    """Raise RuntimeError on Max HTTP 4xx/5xx responses returned by umaxbot bot methods."""
+    if result is None or not hasattr(result, "status_code"):
+        return
+
+    status = getattr(result, "status_code", None)
+    body = getattr(result, "text", "") or ""
+    if status is not None and status >= 400:
+        logger.error(
+            "[Max callback] %s: API error status=%s body=%s",
+            context,
+            status,
+            body[:200],
+            extra={"max_status": status, "max_body": body[:200]},
+        )
+        raise RuntimeError(f"Max API error {context}: status={status} body={body[:200]!r}")
+
+
 def _get_callback_base_class():
     """Import Callback class dynamically to avoid import errors if umaxbot not installed."""
     try:
@@ -142,6 +160,7 @@ class MaxCallbackQuery(PlatformAwareMixin, _CallbackBase):
                     ),
                     timeout=DEFAULT_TIMEOUT
                 )
+                _raise_for_max_response(result, "edit_message_text")
                 return result
         except asyncio.TimeoutError:
             logger.warning("[Max callback] edit_message_text timeout")
@@ -200,6 +219,7 @@ class MaxCallbackQuery(PlatformAwareMixin, _CallbackBase):
                     ),
                     timeout=DEFAULT_TIMEOUT
                 )
+                _raise_for_max_response(result, "edit_message_reply_markup")
                 return result
         except asyncio.TimeoutError:
             logger.warning("[Max callback] edit_message_reply_markup timeout")
@@ -265,10 +285,11 @@ class MaxCallbackQuery(PlatformAwareMixin, _CallbackBase):
         
         try:
             if hasattr(bot, 'delete_message'):
-                await asyncio.wait_for(
+                result = await asyncio.wait_for(
                     bot.delete_message(message_id=str(msg_id)),
                     timeout=DEFAULT_TIMEOUT
                 )
+                _raise_for_max_response(result, "delete_message")
                 return True
         except asyncio.TimeoutError:
             logger.warning("[Max callback] delete_message timeout")

@@ -79,6 +79,75 @@ class TestDispatcherMethods:
         assert mw is not None
 
 
+@pytest.mark.max
+class TestDispatcherMethodsMax:
+    """Mirror TestDispatcherMethods for Max-only bot."""
+
+    def test_dispatcher_methods_exist(self, obabot_max_bot):
+        _, dp, _ = obabot_max_bot
+
+        assert hasattr(dp, "start_polling")
+        assert hasattr(dp, "stop_polling")
+        assert hasattr(dp, "include_router")
+        assert hasattr(dp, "start")
+        assert hasattr(dp, "run_polling")
+        assert hasattr(dp, "middleware")
+        assert hasattr(dp, "workflow_data")
+
+    def test_workflow_data_property(self, obabot_max_bot):
+        _, dp, _ = obabot_max_bot
+
+        data = dp.workflow_data
+        assert isinstance(data, dict)
+
+        dp.workflow_data = {"test": "value"}
+        assert dp.workflow_data.get("test") == "value"
+
+    def test_fsm_storage_property(self, obabot_max_bot):
+        _, dp, _ = obabot_max_bot
+
+        assert hasattr(dp, "fsm_storage")
+
+        from obabot.fsm import MemoryStorage
+
+        storage = MemoryStorage()
+        dp.fsm_storage = storage
+
+        assert dp.fsm_storage is storage
+
+    def test_middleware_registration(self, obabot_max_bot):
+        _, dp, _ = obabot_max_bot
+
+        class TestMiddleware:
+            async def __call__(self, handler, event, data):
+                return await handler(event, data)
+
+        middleware = dp.middleware(TestMiddleware())
+        assert middleware is not None
+
+    def test_router_message_middleware(self, obabot_max_bot):
+        _, _, router = obabot_max_bot
+        assert hasattr(router.message, "middleware")
+
+        class Mw:
+            async def __call__(self, handler, event, data):
+                return await handler(event, data)
+
+        mw = router.message.middleware(Mw())
+        assert mw is not None
+
+    def test_router_callback_query_middleware(self, obabot_max_bot):
+        _, _, router = obabot_max_bot
+        assert hasattr(router.callback_query, "middleware")
+
+        class Mw:
+            async def __call__(self, handler, event, data):
+                return await handler(event, data)
+
+        mw = router.callback_query.middleware(Mw())
+        assert mw is not None
+
+
 class TestFeedUpdateMethods:
     """Test feed_update and feed_raw_update methods."""
     
@@ -171,6 +240,43 @@ class TestFeedUpdateMaxFormat:
         assert platform is not None
 
 
+@pytest.mark.max
+class TestFeedUpdateMaxFormatWithMaxBot:
+    """Max update resolution when only Max platform is configured."""
+
+    def test_resolve_platform_max_selects_max(self, obabot_max_bot):
+        _, dp, _ = obabot_max_bot
+
+        max_update = {
+            "update_type": "message_created",
+            "message": {
+                "body": {"mid": "m1", "text": "Hello"},
+                "sender": {"user_id": 1, "name": "U"},
+                "recipient": {"chat_id": 1, "chat_type": "dialog"},
+            },
+        }
+
+        platform = dp._resolve_platform(max_update, None)
+        assert platform is not None
+        assert str(platform.platform) == "max"
+
+    def test_get_platform_max_by_name(self, obabot_max_bot):
+        _, dp, _ = obabot_max_bot
+
+        platform = dp._get_platform("max")
+        assert platform is not None
+        assert str(platform.platform) == "max"
+
+        assert dp._get_platform("telegram") is None
+
+    def test_resolve_platform_explicit_max(self, obabot_max_bot):
+        _, dp, _ = obabot_max_bot
+
+        platform = dp._resolve_platform({"some": "data"}, "max")
+        assert platform is not None
+        assert str(platform.platform) == "max"
+
+
 class TestPlatformFeedUpdate:
     """Test platform-level feed_update methods."""
     
@@ -184,6 +290,22 @@ class TestPlatformFeedUpdate:
         
         assert hasattr(platform, 'feed_update')
         assert hasattr(platform, 'feed_raw_update')
+        assert callable(platform.feed_update)
+        assert callable(platform.feed_raw_update)
+
+
+@pytest.mark.max
+class TestPlatformFeedUpdateMax:
+    """Mirror TestPlatformFeedUpdate for Max platform."""
+
+    def test_max_platform_has_feed_update(self, obabot_max_bot):
+        _, dp, _ = obabot_max_bot
+
+        platform = dp._get_platform("max")
+        assert platform is not None
+
+        assert hasattr(platform, "feed_update")
+        assert hasattr(platform, "feed_raw_update")
         assert callable(platform.feed_update)
         assert callable(platform.feed_raw_update)
 
@@ -339,6 +461,71 @@ class TestFeedUpdateMock:
         assert result is None
 
 
+class TestLazyDispatcherState:
+    """Regression tests: proxy dispatcher state access must not eagerly init lazy platforms."""
+
+    def test_proxy_state_access_does_not_init_lazy_platform(self):
+        from obabot.platforms.lazy import LazyPlatform
+        from obabot.proxy.dispatcher import ProxyDispatcher
+
+        lazy = LazyPlatform("max", "test_token")
+        dp = ProxyDispatcher([lazy])
+
+        class Mw:
+            pass
+
+        mw = Mw()
+
+        with patch.object(lazy, "_ensure_inited", side_effect=AssertionError("lazy init not expected")) as ensure:
+            assert dp.workflow_data == {}
+            dp.workflow_data = {"x": 1}
+            assert dp.workflow_data == {"x": 1}
+            assert dp.fsm_storage is None
+            assert dp.middleware(mw) is mw
+            ensure.assert_not_called()
+
+        assert lazy._real is None
+
+    def test_runtime_state_applied_to_new_platform(self):
+        from obabot.proxy.dispatcher import ProxyDispatcher
+
+        class DummyObserver:
+            def __init__(self):
+                self.middlewares = []
+
+            def middleware(self, middleware):
+                self.middlewares.append(middleware)
+
+        class DummyFSM:
+            def __init__(self):
+                self.storage = None
+
+        class DummyDispatcher:
+            def __init__(self):
+                self.workflow_data = {}
+                self.update = DummyObserver()
+                self.fsm = DummyFSM()
+
+        class DummyPlatform:
+            def __init__(self):
+                self.dispatcher = DummyDispatcher()
+
+        dp = ProxyDispatcher([])
+        storage = object()
+        middleware = object()
+
+        dp.workflow_data = {"answer": 42}
+        dp.fsm_storage = storage
+        dp.middleware(middleware)
+
+        platform = DummyPlatform()
+        dp._apply_runtime_state_to_platform(platform)
+
+        assert platform.dispatcher.workflow_data == {"answer": 42}
+        assert platform.dispatcher.fsm.storage is storage
+        assert platform.dispatcher.update.middlewares == [middleware]
+
+
 class TestMaxMiddlewareIntegration:
     """Test Max middleware integration."""
     
@@ -351,6 +538,19 @@ class TestMaxMiddlewareIntegration:
         """Test router.message.outer_middleware() exists."""
         _, _, router = obabot_telegram_bot
         assert hasattr(router.message, 'outer_middleware')
+
+
+@pytest.mark.max
+class TestMaxMiddlewareIntegrationRouterMax:
+    """Mirror router middleware API checks on Max-only bot."""
+
+    def test_router_edited_message_has_middleware(self, obabot_max_bot):
+        _, _, router = obabot_max_bot
+        assert hasattr(router.edited_message, "middleware")
+
+    def test_router_outer_middleware(self, obabot_max_bot):
+        _, _, router = obabot_max_bot
+        assert hasattr(router.message, "outer_middleware")
     
     def test_max_platform_has_middleware_methods(self):
         """Test MaxPlatform has middleware storage and methods."""

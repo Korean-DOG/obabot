@@ -443,12 +443,30 @@ class TestCallbackHandlers:
         @router.callback_query(F.data == "register")
         async def register_callback(callback):
             handler_tracker.record("register", callback)
-            data = getattr(callback, 'data', None) or getattr(callback, 'payload', None)
-            assert data == "register"
+            assert callback.data == "register"
         
         await dp.feed_raw_update(update=MAX_CALLBACK_REGISTER, platform="max")
         
         assert handler_tracker.was_called("register"), "register callback should be called for Max"
+        await bot.close()
+    
+    @pytest.mark.max
+    @pytest.mark.asyncio
+    async def test_max_callback_info(self, handler_tracker):
+        """Test callback handler with payload info on Max (mirror Telegram)."""
+        from obabot import create_bot
+        from obabot.filters import F
+        
+        bot, dp, router = create_bot(max_token=TEST_MAX_TOKEN)
+        
+        @router.callback_query(F.data == "info")
+        async def info_callback(callback):
+            handler_tracker.record("info", callback)
+            assert callback.data == "info"
+        
+        await dp.feed_raw_update(update=MAX_CALLBACK_INFO, platform="max")
+        
+        assert handler_tracker.was_called("info"), "info callback should be called for Max"
         await bot.close()
     
     @pytest.mark.dual
@@ -519,6 +537,28 @@ class TestTextMessageHandlers:
         assert handler_tracker.was_called("text"), "text handler should be called for Max"
         await bot.close()
     
+    @pytest.mark.max
+    @pytest.mark.asyncio
+    async def test_max_text_message_content(self, handler_tracker):
+        """Verify message text content on Max (mirror Telegram)."""
+        from obabot import create_bot
+        from obabot.filters import F
+        
+        bot, dp, router = create_bot(max_token=TEST_MAX_TOKEN)
+        
+        received_text = []
+        
+        @router.message(F.text)
+        async def text_handler(message):
+            handler_tracker.record("text", message)
+            received_text.append(message.text)
+        
+        await dp.feed_raw_update(update=MAX_MESSAGE_TEXT, platform="max")
+        
+        assert handler_tracker.was_called("text")
+        assert "Hello Max bot!" in received_text
+        await bot.close()
+    
     @pytest.mark.telegram
     @pytest.mark.asyncio
     async def test_text_message_content(self, handler_tracker):
@@ -582,6 +622,40 @@ class TestMultipleHandlers:
         
         await bot.close()
     
+    @pytest.mark.max
+    @pytest.mark.asyncio
+    async def test_multiple_command_handlers_max(self, handler_tracker):
+        """Correct handler by command on Max (mirror Telegram)."""
+        from obabot import create_bot
+        from obabot.filters import Command, CommandStart
+        
+        bot, dp, router = create_bot(max_token=TEST_MAX_TOKEN)
+        
+        @router.message(CommandStart())
+        async def start_handler(message):
+            handler_tracker.record("start", message)
+        
+        @router.message(Command("help"))
+        async def help_handler(message):
+            handler_tracker.record("help", message)
+        
+        @router.message(Command("settings"))
+        async def settings_handler(message):
+            handler_tracker.record("settings", message)
+        
+        await dp.feed_raw_update(update=MAX_MESSAGE_START, platform="max")
+        assert handler_tracker.was_called("start")
+        assert not handler_tracker.was_called("help")
+        assert not handler_tracker.was_called("settings")
+        
+        handler_tracker.clear()
+        
+        await dp.feed_raw_update(update=MAX_MESSAGE_HELP, platform="max")
+        assert handler_tracker.was_called("help")
+        assert not handler_tracker.was_called("start")
+        
+        await bot.close()
+    
     @pytest.mark.telegram
     @pytest.mark.asyncio
     async def test_multiple_callback_handlers(self, handler_tracker):
@@ -618,6 +692,40 @@ class TestMultipleHandlers:
         
         await bot.close()
     
+    @pytest.mark.max
+    @pytest.mark.asyncio
+    async def test_multiple_callback_handlers_max(self, handler_tracker):
+        """Correct callback handler by payload on Max (mirror Telegram)."""
+        from obabot import create_bot
+        from obabot.filters import F
+        
+        bot, dp, router = create_bot(max_token=TEST_MAX_TOKEN)
+        
+        @router.callback_query(F.data == "register")
+        async def register_callback(callback):
+            handler_tracker.record("register", callback)
+        
+        @router.callback_query(F.data == "info")
+        async def info_callback(callback):
+            handler_tracker.record("info", callback)
+        
+        @router.callback_query(F.data == "cancel")
+        async def cancel_callback(callback):
+            handler_tracker.record("cancel", callback)
+        
+        await dp.feed_raw_update(update=MAX_CALLBACK_REGISTER, platform="max")
+        assert handler_tracker.was_called("register")
+        assert not handler_tracker.was_called("info")
+        assert not handler_tracker.was_called("cancel")
+        
+        handler_tracker.clear()
+        
+        await dp.feed_raw_update(update=MAX_CALLBACK_INFO, platform="max")
+        assert handler_tracker.was_called("info")
+        assert not handler_tracker.was_called("register")
+        
+        await bot.close()
+    
     @pytest.mark.telegram
     @pytest.mark.asyncio
     async def test_mixed_handlers_telegram(self, handler_tracker):
@@ -644,6 +752,35 @@ class TestMultipleHandlers:
         
         # Callback
         await dp.feed_raw_update(update=TELEGRAM_CALLBACK_REGISTER, platform="telegram")
+        assert handler_tracker.was_called("register_cb")
+        assert not handler_tracker.was_called("start_msg")
+        
+        await bot.close()
+    
+    @pytest.mark.max
+    @pytest.mark.asyncio
+    async def test_mixed_handlers_max(self, handler_tracker):
+        """Mix of command and callback handlers on Max (mirror Telegram)."""
+        from obabot import create_bot
+        from obabot.filters import CommandStart, F
+        
+        bot, dp, router = create_bot(max_token=TEST_MAX_TOKEN)
+        
+        @router.message(CommandStart())
+        async def start_handler(message):
+            handler_tracker.record("start_msg", message)
+        
+        @router.callback_query(F.data == "register")
+        async def register_callback(callback):
+            handler_tracker.record("register_cb", callback)
+        
+        await dp.feed_raw_update(update=MAX_MESSAGE_START, platform="max")
+        assert handler_tracker.was_called("start_msg")
+        assert not handler_tracker.was_called("register_cb")
+        
+        handler_tracker.clear()
+        
+        await dp.feed_raw_update(update=MAX_CALLBACK_REGISTER, platform="max")
         assert handler_tracker.was_called("register_cb")
         assert not handler_tracker.was_called("start_msg")
         
@@ -726,6 +863,30 @@ class TestMessageAttributes:
         assert handler_tracker.was_called("callback")
         assert user_data['id'] == 111222333
         assert user_data['first_name'] == "John"
+        await bot.close()
+    
+    @pytest.mark.max
+    @pytest.mark.asyncio
+    async def test_max_callback_from_user(self, handler_tracker):
+        """from_user on Max callback (mirror Telegram)."""
+        from obabot import create_bot
+        from obabot.filters import F
+        
+        bot, dp, router = create_bot(max_token=TEST_MAX_TOKEN)
+        
+        user_data = {}
+        
+        @router.callback_query(F.data == "register")
+        async def callback_handler(callback):
+            handler_tracker.record("callback", callback)
+            user_data["id"] = callback.from_user.id
+            user_data["first_name"] = callback.from_user.first_name
+        
+        await dp.feed_raw_update(update=MAX_CALLBACK_REGISTER, platform="max")
+        
+        assert handler_tracker.was_called("callback")
+        assert user_data["id"] == 444555666
+        assert user_data["first_name"] == "Alice"
         await bot.close()
 
 
@@ -961,7 +1122,7 @@ class TestFilterCorrectness:
         
         assert not handler_tracker.was_called("start"), "start handler should NOT match text"
         assert not handler_tracker.was_called("help"), "help handler should NOT match text"
-        # text handler might or might not match depending on F.text implementation
+        assert handler_tracker.was_called("text"), "text handler should match plain text"
         
         await bot.close()
     
@@ -1431,7 +1592,7 @@ class TestMaxApiErrorRaisesException:
     
     @pytest.mark.asyncio
     async def test_callback_edit_text_400_raises_exception(self):
-        """Test MaxCallbackQuery.edit_message_text exists and can be called."""
+        """Test MaxCallbackQuery.edit_message_text raises RuntimeError on 400 response."""
         from obabot.adapters.max_callback import MaxCallbackQuery
         from maxbot.types import Callback, Message, User, Chat
         
@@ -1451,13 +1612,19 @@ class TestMaxApiErrorRaisesException:
             message=mock_msg,
         )
         
+        mock_response = Mock()
+        mock_response.status_code = 400
+        mock_response.text = '{"code":"error","message":"Bad request"}'
+
         mock_bot = AsyncMock()
-        mock_bot.update_message = AsyncMock(return_value={"success": True})
+        mock_bot.update_message = AsyncMock(return_value=mock_response)
         
         extended = MaxCallbackQuery.from_callback(callback, mock_bot)
-        
-        # Verify the method exists and can be called
-        assert hasattr(extended, 'edit_message_text')
+
+        with pytest.raises(RuntimeError) as exc_info:
+            await extended.edit_message_text("new text")
+
+        assert "400" in str(exc_info.value)
         assert extended.get_platform() == "max"
     
     @pytest.mark.asyncio
@@ -2037,6 +2204,8 @@ class TestRealBotMigrationScenarios:
         # Max callback
         await dp.feed_raw_update(update=MAX_CALLBACK_INFO, platform="max")
         assert handler_tracker.was_called("info")
+        assert edit_calls["tg"] == 1
+        assert edit_calls["max"] == 1
         
         await bot.close()
     
@@ -2087,7 +2256,7 @@ class TestRealBotMigrationScenarios:
         @router.callback_query(F.data.startswith("item_"))
         async def item_callback(callback):
             handler_tracker.record("item", callback)
-            data = getattr(callback, "data", None) or getattr(callback, "payload", None)
+            data = callback.data
             item_id = data.replace("item_", "") if data else None
             extracted_ids.append(item_id)
         

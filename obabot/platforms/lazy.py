@@ -52,7 +52,7 @@ class LazyPlatform(BasePlatform):
         if self._router_ref:
             self._router_ref.apply_pending_handlers(self._real)
         if self._dispatcher_ref:
-            self._dispatcher_ref._apply_fsm_storage_to_platform(self._real)
+            self._dispatcher_ref._apply_runtime_state_to_platform(self._real)
         return self._real
 
     @property

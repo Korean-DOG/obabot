@@ -73,6 +73,43 @@ class TestAPICompatibility:
         assert callable(start)
         assert callable(process_name)
 
+    @pytest.mark.max
+    def test_decorator_compatibility_max(self, obabot_max_bot):
+        """Router/dp decorators on Max-only bot (mirror Telegram side of test_decorator_compatibility)."""
+        _, obabot_dp, obabot_router = obabot_max_bot
+
+        @obabot_router.message(Command("test"))
+        async def obabot_handler(message):
+            pass
+
+        @obabot_dp.message(Command("test2"))
+        async def obabot_dp_handler(message):
+            pass
+
+        assert callable(obabot_handler)
+        assert callable(obabot_dp_handler)
+
+    @pytest.mark.max
+    def test_fsm_compatibility_max(self, obabot_max_bot):
+        """FSM registration on Max-only bot."""
+        _, _, router = obabot_max_bot
+
+        class TestForm(StatesGroup):
+            name = State()
+            age = State()
+
+        @router.message(Command("start"))
+        async def start(message, state: FSMContext):
+            await state.set_state(TestForm.name)
+
+        @router.message(TestForm.name)
+        async def process_name(message, state: FSMContext):
+            await state.update_data(name=message.text)
+            await state.set_state(TestForm.age)
+
+        assert callable(start)
+        assert callable(process_name)
+
 
 class TestMethodSignatures:
     """Test that method signatures match aiogram."""
@@ -94,4 +131,15 @@ class TestMethodSignatures:
         assert 'text' in obabot_sig.parameters
         assert 'chat_id' in aiogram_sig.parameters
         assert 'text' in aiogram_sig.parameters
+
+    @pytest.mark.max
+    @pytest.mark.asyncio
+    async def test_send_message_signature_max(self, obabot_max_bot):
+        """ProxyBot.send_message has chat_id and text (Max path)."""
+        obabot_bot, _, _ = obabot_max_bot
+        import inspect
+
+        sig = inspect.signature(obabot_bot.send_message)
+        assert "chat_id" in sig.parameters
+        assert "text" in sig.parameters
 

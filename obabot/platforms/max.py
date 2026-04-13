@@ -1,8 +1,9 @@
 """Max platform implementation using umaxbot with aiogram-compatible API."""
 
 from functools import wraps
-from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING
+from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING, Union, get_args, get_origin, get_type_hints
 import asyncio
+import inspect
 import logging
 
 from obabot.config import get_update_context
@@ -22,9 +23,48 @@ logger = logging.getLogger(__name__)
 MIDDLEWARE_OBSERVER_TYPES = ("message", "callback_query", "edited_message")
 
 
+def _annotation_is_fsm_context(ann: Any) -> bool:
+    """True if annotation is FSMContext, Optional[FSMContext], or X | None with FSMContext."""
+    if ann is None or ann is inspect.Parameter.empty:
+        return False
+    try:
+        from aiogram.fsm.context import FSMContext
+    except ImportError:
+        return False
+    if ann is FSMContext:
+        return True
+    origin = get_origin(ann)
+    if origin is None:
+        return False
+    try:
+        import types
+        union_types = (Union,)
+        if hasattr(types, "UnionType"):
+            union_types = (Union, types.UnionType)
+        if origin in union_types:
+            return any(_annotation_is_fsm_context(a) for a in get_args(ann) if a not in (type(None),))
+    except Exception:
+        return False
+    return False
+
+
+class _ObabotMaxAiogramStateFilter:
+    """Maps aiogram State to FSM storage (async check via MaxPlatform._filter_check)."""
+
+    __slots__ = ("_aiogram_state",)
+
+    def __init__(self, aiogram_state: Any) -> None:
+        self._aiogram_state = aiogram_state
+
+    @property
+    def aiogram_state(self) -> Any:
+        return self._aiogram_state
+
+
 def _make_middleware_chain(
     handler: Callable,
     middlewares: List[Any],
+    handler_kw: Optional[Dict[str, Any]] = None,
 ) -> Callable:
     """
     Build middleware chain for handler.
@@ -39,13 +79,19 @@ def _make_middleware_chain(
     Returns:
         Wrapped handler: (event, data) -> result
     """
+    hkw = handler_kw or {}
+
     if not middlewares:
         async def no_middleware_handler(event: Any, data: Dict[str, Any]) -> Any:
+            if hkw:
+                return await handler(event, **hkw)
             return await handler(event)
         return no_middleware_handler
     
     # Final handler converts (event, data) -> handler(event)
     async def final_handler(event: Any, data: Dict[str, Any]) -> Any:
+        if hkw:
+            return await handler(event, **hkw)
         return await handler(event)
     
     # Build chain from inside out
@@ -65,6 +111,7 @@ async def _call_with_middlewares(
     event: Any,
     data: Dict[str, Any],
     middlewares: List[Tuple[Any, bool]],
+    handler_kw: Optional[Dict[str, Any]] = None,
 ) -> Any:
     """
     Call handler with middleware chain.
@@ -83,7 +130,7 @@ async def _call_with_middlewares(
     inner_mws = [mw for mw, is_outer in middlewares if not is_outer]
     
     # Build inner chain first (handler + inner middlewares)
-    inner_chain = _make_middleware_chain(handler, inner_mws)
+    inner_chain = _make_middleware_chain(handler, inner_mws, handler_kw)
     
     # Wrap inner chain as a handler for outer middlewares
     async def inner_as_handler(event: Any) -> Any:
@@ -120,6 +167,8 @@ class MaxPlatform(BasePlatform):
         self._handlers_setup = False
         # Middleware storage: {observer_type: [(middleware, is_outer), ...]}
         self._middlewares: Dict[str, List[Tuple[Any, bool]]] = {t: [] for t in MIDDLEWARE_OBSERVER_TYPES}
+        # aiogram FSM storage for FSMContext / State filters (separate from maxbot's sync FSMStorage)
+        self._obabot_fsm_storage: Any = None
         
         self._init_umaxbot()
     
@@ -158,6 +207,83 @@ class MaxPlatform(BasePlatform):
     def router(self) -> Optional["Router"]:
         """Return the internal router for handler registration."""
         return self._router
+
+    def set_obabot_fsm_storage(self, storage: Any) -> None:
+        """Attach aiogram-compatible FSM storage (set from ProxyDispatcher.fsm_storage)."""
+        self._obabot_fsm_storage = storage
+    
+    def _get_fsm_storage(self) -> Any:
+        if self._obabot_fsm_storage is not None:
+            return self._obabot_fsm_storage
+        from aiogram.fsm.storage.memory import MemoryStorage
+
+        self._obabot_fsm_storage = MemoryStorage()
+        return self._obabot_fsm_storage
+
+    def _fsm_storage_key(self, event: Any) -> Any:
+        from aiogram.fsm.storage.base import StorageKey
+
+        bot_id = int(getattr(self._bot, "id", None) or 0)
+        user_id: Optional[int] = None
+        chat_id: Optional[int] = None
+
+        if hasattr(event, "from_user") and event.from_user is not None:
+            user_id = getattr(event.from_user, "id", None)
+        if user_id is None and hasattr(event, "user") and event.user is not None:
+            user_id = getattr(event.user, "id", None)
+
+        if hasattr(event, "message") and event.message is not None:
+            msg = event.message
+            if hasattr(msg, "chat") and msg.chat is not None:
+                chat_id = getattr(msg.chat, "id", None)
+            if user_id is None and hasattr(msg, "from_user") and msg.from_user is not None:
+                user_id = getattr(msg.from_user, "id", None)
+
+        if hasattr(event, "chat") and event.chat is not None:
+            chat_id = getattr(event.chat, "id", None)
+
+        if chat_id is None:
+            chat_id = user_id
+        if user_id is None:
+            user_id = chat_id or 0
+        if chat_id is None:
+            chat_id = user_id
+
+        return StorageKey(bot_id=bot_id, chat_id=int(chat_id or 0), user_id=int(user_id or 0))
+
+    async def _build_handler_kw(self, handler: Callable, event: Any) -> Dict[str, Any]:
+        try:
+            from aiogram.fsm.context import FSMContext
+        except ImportError:
+            return {}
+
+        try:
+            hints = get_type_hints(handler)
+        except Exception:
+            hints = {}
+
+        kw: Dict[str, Any] = {}
+        try:
+            sig = inspect.signature(handler)
+        except (TypeError, ValueError):
+            return kw
+
+        params = list(sig.parameters.items())
+        for i, (name, param) in enumerate(params):
+            if i == 0:
+                continue
+            ann = hints.get(name, param.annotation)
+            if _annotation_is_fsm_context(ann):
+                kw[name] = FSMContext(
+                    storage=self._get_fsm_storage(),
+                    key=self._fsm_storage_key(event),
+                )
+        return kw
+
+    async def _get_fsm_state_string(self, event: Any) -> Optional[str]:
+        storage = self._get_fsm_storage()
+        key = self._fsm_storage_key(event)
+        return await storage.get_state(key)
     
     def convert_filters_for_platform(self, filters: tuple, handler_type: str = "message") -> tuple:
         """
@@ -288,6 +414,21 @@ class MaxPlatform(BasePlatform):
         So for Command/CommandStart we use _create_command_filter (checks message.text).
         """
         from aiogram.filters import Command, CommandStart
+
+        try:
+            from aiogram.fsm.state import State as AiogramState
+        except ImportError:
+            AiogramState = None  # type: ignore[misc, assignment]
+
+        try:
+            from aiogram.filters import StateFilter as AiogramStateFilter
+        except ImportError:
+            AiogramStateFilter = None  # type: ignore[misc, assignment]
+
+        try:
+            from maxbot.fsm import State as MaxFsmState
+        except ImportError:
+            MaxFsmState = None  # type: ignore[misc, assignment]
         
         converted = []
         for f in filters:
@@ -303,13 +444,17 @@ class MaxPlatform(BasePlatform):
             
             elif filter_name == 'MagicFilter':
                 converted.append(f)
-            
-            elif 'State' in filter_name:
+
+            elif AiogramStateFilter is not None and isinstance(f, AiogramStateFilter):
+                converted.append(f)
+
+            elif AiogramState is not None and isinstance(f, AiogramState):
+                converted.append(_ObabotMaxAiogramStateFilter(f))
+
+            elif MaxFsmState is not None and isinstance(f, MaxFsmState):
                 try:
-                    from maxbot.filters import StateFilter
-                    state = getattr(f, 'state', None)
-                    if state:
-                        converted.append(StateFilter(state))
+                    from maxbot.filters import StateFilter as MaxStateFilter
+                    converted.append(MaxStateFilter(f))
                 except ImportError:
                     converted.append(f)
             
@@ -330,9 +475,61 @@ class MaxPlatform(BasePlatform):
                     return True
             return False
         return command_filter
+
+    async def _obabot_long_polling(self) -> None:
+        """
+        Long polling loop compatible with obabot (not umaxbot's internal _polling).
+
+        umaxbot's Dispatcher has run_polling() but no start_polling(); its _polling loop
+        calls filter.check() on raw messages and skips MaxMessageAdapter / aiogram filters.
+        We GET /updates and dispatch each event through _dispatch_raw_update (same as webhooks).
+        """
+        if not self._bot:
+            return
+
+        marker = 0
+        try:
+            me = await self._bot.get_me()
+            if isinstance(me, dict) and me.get("id") is not None:
+                setattr(self._bot, "id", int(me["id"]))
+            logger.info("Max long polling: bot info %s", me)
+        except Exception as e:
+            logger.warning("Max long polling: get_me failed (%s), continuing", e)
+
+        poll_interval = 0.3
+        while self._running:
+            try:
+                response = await self._bot._request(
+                    "GET",
+                    "/updates",
+                    params={"offset": marker},
+                )
+                if not isinstance(response, dict):
+                    await asyncio.sleep(poll_interval)
+                    continue
+
+                updates = response.get("updates", [])
+                for update in updates:
+                    if not isinstance(update, dict):
+                        continue
+                    try:
+                        await self._dispatch_raw_update(update)
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception:
+                        logger.exception("[Max] dispatch error for update keys=%s", list(update.keys()))
+
+                marker = response.get("marker", marker)
+            except asyncio.CancelledError:
+                logger.info("Max long polling cancelled")
+                raise
+            except Exception as e:
+                logger.error("Max long polling request error: %s", e)
+
+            await asyncio.sleep(poll_interval)
     
     async def start_polling(self) -> None:
-        """Start polling using umaxbot dispatcher."""
+        """Start long polling for Max (obabot dispatch path, aligned with webhooks)."""
         if not self._dispatcher:
             logger.error("umaxbot not initialized, cannot start polling")
             return
@@ -341,12 +538,14 @@ class MaxPlatform(BasePlatform):
         self._running = True
         
         try:
-            await self._dispatcher.start_polling()
+            await self._obabot_long_polling()
         except asyncio.CancelledError:
             logger.info("Max polling cancelled")
         except Exception as e:
             logger.error(f"Max polling error: {e}")
             raise
+        finally:
+            self._running = False
     
     async def stop_polling(self) -> None:
         """Stop polling."""
@@ -447,6 +646,29 @@ class MaxPlatform(BasePlatform):
                     return command_part in commands
                 return command_part == commands
             return False
+
+        try:
+            from aiogram.filters import StateFilter as AiogramStateFilter
+        except ImportError:
+            AiogramStateFilter = None  # type: ignore[misc, assignment]
+
+        if AiogramStateFilter is not None and isinstance(flt, AiogramStateFilter):
+            raw = await self._get_fsm_state_string(data)
+            try:
+                result = await flt(data, raw_state=raw)
+            except Exception as e:
+                logger.debug("[Max] aiogram StateFilter failed: %s", e)
+                return False
+            if isinstance(result, dict):
+                return True
+            return bool(result)
+
+        if isinstance(flt, _ObabotMaxAiogramStateFilter):
+            raw = await self._get_fsm_state_string(data)
+            target = flt.aiogram_state.state
+            if target == "*":
+                return True
+            return raw == target
         
         # Handle umaxbot filters with .check() method
         if hasattr(flt, 'check') and callable(getattr(flt, 'check')):
@@ -533,7 +755,10 @@ class MaxPlatform(BasePlatform):
                     if passed:
                         logger.info("%s -> %s", ctx, name)
                         try:
-                            await _call_with_middlewares(func, msg_adapter, mw_data, msg_middlewares)
+                            hkw = await self._build_handler_kw(func, msg_adapter)
+                            await _call_with_middlewares(
+                                func, msg_adapter, mw_data, msg_middlewares, handler_kw=hkw or None
+                            )
                             logger.debug("%s handler %s done", ctx, name)
                             handled = True
                             break  # Stop after first matching handler
@@ -559,7 +784,10 @@ class MaxPlatform(BasePlatform):
                             if passed:
                                 logger.info("%s -> %s", ctx, name)
                                 try:
-                                    await _call_with_middlewares(func, msg_adapter, mw_data, msg_middlewares)
+                                    hkw = await self._build_handler_kw(func, msg_adapter)
+                                    await _call_with_middlewares(
+                                        func, msg_adapter, mw_data, msg_middlewares, handler_kw=hkw or None
+                                    )
                                     logger.debug("%s handler %s done", ctx, name)
                                     handled = True
                                     break  # Stop after first matching handler
@@ -593,7 +821,10 @@ class MaxPlatform(BasePlatform):
                     if await self._filter_check(flt, cb_extended):
                         name = getattr(func, '__name__', str(func))
                         logger.info("%s -> %s", ctx, name)
-                        await _call_with_middlewares(func, cb_extended, cb_mw_data, cb_middlewares)
+                        hkw = await self._build_handler_kw(func, cb_extended)
+                        await _call_with_middlewares(
+                            func, cb_extended, cb_mw_data, cb_middlewares, handler_kw=hkw or None
+                        )
                         logger.debug("%s handler %s done", ctx, name)
                         handled = True
                         break  # Stop after first matching handler
@@ -607,7 +838,10 @@ class MaxPlatform(BasePlatform):
                             if await self._filter_check(flt, cb_extended):
                                 name = getattr(func, '__name__', str(func))
                                 logger.info("%s -> %s", ctx, name)
-                                await _call_with_middlewares(func, cb_extended, cb_mw_data, cb_middlewares)
+                                hkw = await self._build_handler_kw(func, cb_extended)
+                                await _call_with_middlewares(
+                                    func, cb_extended, cb_mw_data, cb_middlewares, handler_kw=hkw or None
+                                )
                                 logger.debug("%s handler %s done", ctx, name)
                                 handled = True
                                 break  # Stop after first matching handler

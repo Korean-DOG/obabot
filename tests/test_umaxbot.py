@@ -4,6 +4,33 @@ import pytest
 from unittest.mock import Mock, AsyncMock, patch, MagicMock
 
 
+class TestMaxPlatformStartPolling:
+    """Regression: umaxbot Dispatcher has no start_polling(); obabot uses its own long-poll loop."""
+
+    @pytest.mark.asyncio
+    async def test_start_polling_uses_obabot_long_polling_not_dispatcher(self):
+        from obabot.platforms.max import MaxPlatform
+
+        platform = MaxPlatform("test_token")
+        platform._obabot_long_polling = AsyncMock()
+        await platform.start_polling()
+        platform._obabot_long_polling.assert_awaited_once()
+
+
+class TestMaxFsmContextAnnotation:
+    """FSMContext injection recognizes Optional / union annotations."""
+
+    def test_annotation_is_fsm_context_plain_and_optional(self):
+        from typing import Optional
+        from obabot.platforms.max import _annotation_is_fsm_context
+        from aiogram.fsm.context import FSMContext
+
+        assert _annotation_is_fsm_context(FSMContext) is True
+        assert _annotation_is_fsm_context(Optional[FSMContext]) is True
+        assert _annotation_is_fsm_context(str) is False
+        assert _annotation_is_fsm_context(FSMContext | None) is True  # PEP 604
+
+
 class TestMaxPlatformInit:
     """Tests for MaxPlatform initialization."""
     
