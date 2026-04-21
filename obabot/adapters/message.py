@@ -9,6 +9,7 @@ import logging
 from typing import Any, Optional, TYPE_CHECKING
 
 from obabot.config import log_outgoing_message
+from obabot.utils.max_api import delete_max_message
 from obabot.utils.text_format import format_text_for_platform
 
 if TYPE_CHECKING:
@@ -595,9 +596,9 @@ class MaxMessageAdapter:
         )
         
         try:
-            if self._bot and hasattr(self._bot, 'delete_message') and msg_id:
+            if self._bot and msg_id:
                 logger.info("[Max send] delete via bot.delete_message: msg_id=%s", msg_id)
-                coro = self._bot.delete_message(message_id=str(msg_id))
+                coro = delete_max_message(self._bot, msg_id)
                 result = await asyncio.wait_for(coro, timeout=DEFAULT_TIMEOUT)
                 self._log_max_response(result, "delete")
                 return result

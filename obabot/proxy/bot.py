@@ -10,6 +10,7 @@ import httpx
 from obabot.config import log_outgoing_message
 from obabot.context import get_current_platform
 from obabot.types import BPlatform
+from obabot.utils.max_api import delete_max_message
 
 if TYPE_CHECKING:
     from aiogram.types import File as TelegramFile
@@ -910,7 +911,11 @@ class ProxyBot:
         platform: Optional[Union[BPlatform, str]] = None,
     ) -> bool:
         """Delete a message."""
+        resolved_platform = self._resolve_platform_for_operation(platform)
         bot = self._get_bot_for_operation(platform)
+        if resolved_platform == BPlatform.max:
+            await delete_max_message(bot, message_id)
+            return True
         return await bot.delete_message(chat_id=chat_id, message_id=message_id)
     
     async def get_me(

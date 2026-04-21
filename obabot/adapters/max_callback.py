@@ -9,6 +9,7 @@ import logging
 from typing import Any, Optional, TYPE_CHECKING
 
 from obabot.mixins import PlatformAwareMixin
+from obabot.utils.max_api import delete_max_message
 
 if TYPE_CHECKING:
     from maxbot.bot import Bot
@@ -284,9 +285,9 @@ class MaxCallbackQuery(PlatformAwareMixin, _CallbackBase):
             return False
         
         try:
-            if hasattr(bot, 'delete_message'):
+            if bot:
                 result = await asyncio.wait_for(
-                    bot.delete_message(message_id=str(msg_id)),
+                    delete_max_message(bot, msg_id),
                     timeout=DEFAULT_TIMEOUT
                 )
                 _raise_for_max_response(result, "delete_message")
